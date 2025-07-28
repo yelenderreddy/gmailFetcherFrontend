@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import quotedPrintable from 'quoted-printable';
 
 // Netflix-inspired color palette
-const colors = {
+const netflixColors = {
   netflixRed: '#E50914',
   netflixBlack: '#141414',
   netflixDarkGray: '#181818',
@@ -17,6 +17,53 @@ const EmailViewer = () => {
   const [emailData, setEmailData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [verificationStatus, setVerificationStatus] = useState({});
+  const ws = useRef(null);
+
+  useEffect(() => {
+    // Cleanup WebSocket on component unmount
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
+  }, []);
+
+  const connectWebSocket = (email) => {
+    if (ws.current) {
+      ws.current.close();
+    }
+
+    // Connect to WebSocket server
+    ws.current = new WebSocket('ws://localhost:5000');
+
+    ws.current.onopen = () => {
+      console.log('WebSocket connected');
+      // Subscribe to email updates
+      ws.current.send(JSON.stringify({
+        type: 'subscribe',
+        email
+      }));
+    };
+
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'verification_update') {
+        setVerificationStatus(prev => ({
+          ...prev,
+          [data.messageId]: data.status
+        }));
+      }
+    };
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.current.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+  };
 
   // Decode base64 and quoted-printable safely
   const decodeContent = (encoded) => {
@@ -107,6 +154,13 @@ const EmailViewer = () => {
       if (response.data) {
         setEmailData(response.data);
         setLatestEmails([{ id: response.data.id, snippet: response.data.snippet }]);
+        setVerificationStatus(prev => ({
+          ...prev,
+          [response.data.id]: response.data.verificationStatus
+        }));
+
+        // Connect to WebSocket for real-time updates
+        connectWebSocket(gmailId.trim());
       } else {
         setError('No emails found for this Gmail ID');
       }
@@ -128,6 +182,10 @@ const EmailViewer = () => {
     try {
       const response = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/emails/${messageId}`);
       setEmailData(response.data);
+      setVerificationStatus(prev => ({
+        ...prev,
+        [response.data.id]: response.data.verificationStatus
+      }));
     } catch (err) {
       setError('Failed to fetch email details');
       console.error(err);
@@ -137,21 +195,18 @@ const EmailViewer = () => {
   };
 
   // Trigger verification click on backend
-  const handleVerifyClick = async () => {
+  const handleVerifyClick = async (url) => {
     if (!emailData) return;
 
-    const url = extractVerifyUrl(emailData);
-    if (!url) {
-      alert('No verification URL found in this email.');
-      return;
-    }
-
     try {
-      await axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/trigger-verify-click`, { url });
-      alert('Verification triggered successfully!');
-    } catch (err) {
-      alert('Verification failed.');
-      console.error(err);
+      await axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/trigger-verify-click`, {
+        url,
+        email: gmailId.trim(),
+        messageId: emailData.id
+      });
+    } catch (error) {
+      console.error('Error triggering verification:', error);
+      setError('Failed to trigger verification');
     }
   };
 
@@ -165,32 +220,32 @@ const EmailViewer = () => {
 
     return (
       <div style={{
-        border: `1px solid ${colors.netflixLightGray}`,
+        border: `1px solid ${netflixColors.netflixLightGray}`,
         padding: '20px',
         borderRadius: '8px',
-        backgroundColor: colors.netflixDarkGray,
-        color: colors.white,
+        backgroundColor: netflixColors.netflixDarkGray,
+        color: netflixColors.white,
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
         margin: '20px 0'
       }}>
-        <h3 style={{ color: colors.netflixRed, marginBottom: '20px' }}>Email Details</h3>
+        <h3 style={{ color: netflixColors.netflixRed, marginBottom: '20px' }}>Email Details</h3>
         <div style={{ marginBottom: '15px' }}>
-          <p><strong style={{ color: colors.netflixRed }}>From:</strong> {headers.from || 'N/A'}</p>
-          <p><strong style={{ color: colors.netflixRed }}>To:</strong> {headers.to || 'N/A'}</p>
-          <p><strong style={{ color: colors.netflixRed }}>Subject:</strong> {headers.subject || 'N/A'}</p>
-          <p><strong style={{ color: colors.netflixRed }}>Date:</strong> {formatDate(headers.date)}</p>
+          <p><strong style={{ color: netflixColors.netflixRed }}>From:</strong> {headers.from || 'N/A'}</p>
+          <p><strong style={{ color: netflixColors.netflixRed }}>To:</strong> {headers.to || 'N/A'}</p>
+          <p><strong style={{ color: netflixColors.netflixRed }}>Subject:</strong> {headers.subject || 'N/A'}</p>
+          <p><strong style={{ color: netflixColors.netflixRed }}>Date:</strong> {formatDate(headers.date)}</p>
         </div>
 
-        <hr style={{ borderColor: colors.netflixLightGray }} />
+        <hr style={{ borderColor: netflixColors.netflixLightGray }} />
 
         {htmlContent ? (
           <div
                 style={{
-              border: `1px solid ${colors.netflixLightGray}`,
+              border: `1px solid ${netflixColors.netflixLightGray}`,
               padding: '15px',
               maxHeight: '400px',
               overflowY: 'auto',
-              backgroundColor: colors.netflixBlack,
+              backgroundColor: netflixColors.netflixBlack,
               borderRadius: '4px'
             }}
             dangerouslySetInnerHTML={{ __html: htmlContent }}
@@ -198,12 +253,12 @@ const EmailViewer = () => {
         ) : (
               <pre style={{
                 whiteSpace: 'pre-wrap',
-            backgroundColor: colors.netflixBlack,
+            backgroundColor: netflixColors.netflixBlack,
             padding: '15px',
                 maxHeight: '300px',
             overflowY: 'auto',
             borderRadius: '4px',
-            color: colors.white
+            color: netflixColors.white
               }}>
             {textContent || 'No content available.'}
               </pre>
@@ -211,13 +266,13 @@ const EmailViewer = () => {
 
         {verifyUrl && (
           <div style={{ marginTop: '20px' }}>
-            <h4 style={{ color: colors.netflixRed }}>Verification URL</h4>
-            <p style={{ wordBreak: 'break-all', color: colors.white }}>{verifyUrl}</p>
+            <h4 style={{ color: netflixColors.netflixRed }}>Verification URL</h4>
+            <p style={{ wordBreak: 'break-all', color: netflixColors.white }}>{verifyUrl}</p>
             <button
-              onClick={handleVerifyClick}
+              onClick={() => handleVerifyClick(verifyUrl)}
               style={{
-                backgroundColor: colors.netflixRed,
-                color: colors.white,
+                backgroundColor: netflixColors.netflixRed,
+                color: netflixColors.white,
                 padding: '12px 24px',
                 border: 'none',
                 borderRadius: '4px',
@@ -245,7 +300,7 @@ const EmailViewer = () => {
       maxWidth: '1200px',
       margin: '0 auto',
       minHeight: '100vh',
-      color: colors.white,
+      color: netflixColors.white,
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
@@ -256,7 +311,7 @@ const EmailViewer = () => {
       background: `linear-gradient(rgba(20,20,20,0.85), rgba(20,20,20,0.85)), url('https://i.pinimg.com/736x/19/8b/2f/198b2f01e73b905772279616eccc7c65.jpg') center center / cover no-repeat fixed`
     }}>
       <h1 style={{
-        color: colors.netflixRed,
+        color: netflixColors.netflixRed,
         textAlign: 'center',
         marginBottom: '30px',
         fontSize: '2.5rem'
@@ -266,12 +321,12 @@ const EmailViewer = () => {
 
       {error && (
         <div style={{
-          color: colors.netflixRed,
+          color: netflixColors.netflixRed,
           marginBottom: '15px',
           padding: '10px',
           backgroundColor: 'rgba(229, 9, 20, 0.1)',
           borderRadius: '4px',
-          border: `1px solid ${colors.netflixRed}`
+          border: `1px solid ${netflixColors.netflixRed}`
         }}>
           <strong>Error:</strong> {error}
         </div>
@@ -304,9 +359,9 @@ const EmailViewer = () => {
               padding: '12px',
               width: '100%',
               borderRadius: '4px',
-              border: `1px solid ${colors.netflixLightGray}`,
-              backgroundColor: colors.netflixDarkGray,
-              color: colors.white,
+              border: `1px solid ${netflixColors.netflixLightGray}`,
+              backgroundColor: netflixColors.netflixDarkGray,
+              color: netflixColors.white,
               fontSize: '16px',
               textAlign: 'center'
             }}
@@ -316,8 +371,8 @@ const EmailViewer = () => {
           onClick={fetchLatestEmails}
             disabled={loading || !gmailId.trim()}
           style={{
-              backgroundColor: colors.netflixRed,
-              color: colors.white,
+              backgroundColor: netflixColors.netflixRed,
+              color: netflixColors.white,
               padding: '12px 24px',
             border: 'none',
             borderRadius: '4px',
@@ -336,14 +391,14 @@ const EmailViewer = () => {
 
       {latestEmails.length > 0 && (
         <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ color: colors.netflixRed, marginBottom: '15px' }}>Latest Emails</h3>
+          <h3 style={{ color: netflixColors.netflixRed, marginBottom: '15px' }}>Latest Emails</h3>
           <div
             style={{
-              border: `1px solid ${colors.netflixLightGray}`,
+              border: `1px solid ${netflixColors.netflixLightGray}`,
               borderRadius: '4px',
               maxHeight: '250px',
               overflowY: 'auto',
-              backgroundColor: colors.netflixDarkGray
+              backgroundColor: netflixColors.netflixDarkGray
             }}
           >
             {latestEmails.map((email) => (
@@ -352,7 +407,7 @@ const EmailViewer = () => {
                 onClick={() => fetchEmailDetails(email.id)}
                 style={{
                   padding: '15px',
-                  borderBottom: `1px solid ${colors.netflixLightGray}`,
+                  borderBottom: `1px solid ${netflixColors.netflixLightGray}`,
                   cursor: 'pointer',
                   backgroundColor: emailData?.id === email.id ? 'rgba(229, 9, 20, 0.1)' : 'transparent',
                   transition: 'background-color 0.3s ease',
@@ -362,8 +417,8 @@ const EmailViewer = () => {
                 }}
                 title={email.snippet}
               >
-                <strong style={{ color: colors.netflixRed }}>ID:</strong> {email.id} <br />
-                <small style={{ color: colors.netflixLightGray }}>{email.snippet}</small>
+                <strong style={{ color: netflixColors.netflixRed }}>ID:</strong> {email.id} <br />
+                <small style={{ color: netflixColors.netflixLightGray }}>{email.snippet}</small>
               </div>
             ))}
           </div>
@@ -374,7 +429,7 @@ const EmailViewer = () => {
         <div style={{
           textAlign: 'center',
           padding: '20px',
-          color: colors.netflixLightGray
+          color: netflixColors.netflixLightGray
         }}>
           Loading email details...
       </div>
